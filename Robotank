@@ -1,0 +1,454 @@
+package comp222;
+
+import robocode.*;
+import java.awt.Color;
+import java.awt.geom.Point2D;
+import java.awt.geom.RoundRectangle2D;
+import java.util.Iterator;
+import java.util.Random;
+import java.util.Vector;
+
+/**
+ *
+ * @author Name: Shuhao Zhang ID : 201138949
+ */
+// API help : http://robocode.sourceforge.net/docs/robocode/robocode/Robot.html
+/**
+ * Shuhaozhang - a robot by (your name here)
+ */
+public class ShuhaoZhang extends AdvancedRobot {
+
+    //value for tank to change the direction
+    public int movementDirection = 1;
+    //enemyList that store all the information of each enemy
+    public Vector enemyVector;
+    //Object Gun is used to set Gun
+    public Gun tankGun;
+    //a specific enemy
+    public Enemy MyEnemy;
+    //tank's future position(predicted)
+    public Point2D.Double desired;
+    //a rectangle smaller than battlefield(avoid tank hit the wall)
+    public RoundRectangle2D.Double boundary;
+    //when there is only one enemy left
+    public boolean OnebyOne = false;
+
+    public void run() {
+
+        setColors(Color.GRAY, Color.BLACK, Color.LIGHT_GRAY); // body,gun,radar
+        setBulletColor(Color.WHITE);
+        //set gun, radar, vehicle in different part
+        setAdjustGunForRobotTurn(true);
+        setAdjustRadarForGunTurn(true);
+        //create the enemyList, enemy and gun.
+        enemyVector = new Vector();
+        MyEnemy = new Enemy();
+        tankGun = new Gun(enemyVector, this);
+        //Turn around radar to add enemy first
+        setTurnRadarRightRadians(2 * Math.PI);
+        while (true) {
+            //choose the pattern of radar(track or rotate 360 degrees)
+            setRadar();
+            //set Gun and fire
+            tankGun.update();
+
+            execute();
+        }
+    }
+
+    public void setRadar() {
+
+        if (OnebyOne) {
+            //track the target
+            //radar control code is in the method onScannedRobot
+        } else {
+            //rotate radar 360 degrees always
+            setTurnRadarRightRadians(2 * Math.PI);
+
+        }
+    }
+
+    /**
+     * onScannedRobot: What to do when you see another robot
+     */
+    public void onScannedRobot(ScannedRobotEvent e) {
+        //update the information of enemies
+        MyEnemy = isinVector(e);
+        //compute the energy changes
+        double EnergyChanged = MyEnemy.prevEnergy - e.getEnergy();
+        //set the size and position of rectangle
+        boundary = new RoundRectangle2D.Double(20, 20, getBattleFieldWidth() - 40, getBattleFieldHeight() - 40, 10, 10);
+        //initialize the future position of tank
+        desired = new Point2D.Double(0, 0);
+        if (EnergyChanged >= 0.1 && EnergyChanged <= 3) {
+            //change the direction each time
+            movementDirection = -movementDirection;
+            //bullet fly time
+            double moveDuring = (e.getDistance() / (20 - 3 * EnergyChanged));
+            //random movement and random direction 
+            double movement = (moveDuring * 5 + Math.random() * 3) * movementDirection;
+            //predict the future position
+            double x = getX() + movement * Math.sin(this.getHeadingRadians());
+            double y = getY() + movement * Math.cos(this.getHeadingRadians());
+            desired.setLocation(x, y);
+            //outside the rectangle
+            if (!boundary.contains(desired)) {
+                //move back
+                
+                setBack(Math.random() * 3);
+            } else {
+                //turn to vertical direction and move to avoid bullet
+                setTurnRight(e.getBearing() + 90 - 30 * movementDirection);
+                setAhead(movement);
+            }
+        }
+        //when there is only one enemy left
+        //track the enemy
+        if (OnebyOne) {
+            double Offset = MyEnemy.normaliseBearing(MyEnemy.direction - getRadarHeadingRadians());
+            setTurnRadarRightRadians(Offset * 2);
+        }
+    }
+
+    /*
+     when some tank dead, it will be removed from the enemyList
+     */
+    public void onRobotDeath(RobotDeathEvent d) {
+        for (int i = 0; i < enemyVector.size(); i++) {
+            Enemy enemy = (Enemy) enemyVector.get(i);
+            if (enemy.name == d.getName()) {
+
+                System.out.println("Enemy " + d.getName() + "died");
+                enemyVector.remove(i);
+            }
+        }
+        //change the color, top 3
+        if (enemyVector.size() <= 2) {
+            setColors(Color.BLACK, Color.PINK, Color.BLACK);
+        }
+        //only one enemy left on the battle
+        if (enemyVector.size() == 1) {
+            OnebyOne = true;
+        }
+    }
+
+    // onHitByBullet: 
+    // compute the damage that made by each enemy
+    public void onHitByBullet(HitByBulletEvent e) {
+        double power = e.getPower();
+        double bulletDamage = 0;
+		Iterator iter3 = enemyVector.iterator();
+        if (power <= 1) {
+            bulletDamage = 4 * power;
+        }
+        if (power > 1) {
+            bulletDamage = 4 * power + 2 * (power - 1);
+        }
+       while (iter3.hasNext()) {
+            Enemy enemy = (Enemy) (iter3.next());
+            if (enemy.name == e.getName()) {
+                enemy.damage += bulletDamage;
+                System.out.println("damage by: " + enemy.name + "= " + enemy.damage);
+            }
+        }
+    }
+
+    /**
+     * onHitWall: while tank hit wall, try to move to center of battlefield
+     */
+    public void onHitWall(HitWallEvent e) {
+        // Replace the next line with any
+        double angle = MyEnemy.normaliseHeading(this.getHeadingRadians() + (MyEnemy.getAngle(getX(), getY(), getBattleFieldWidth() / 2, getBattleFieldHeight() / 2)));
+        setTurnRightRadians(angle);
+        setAhead(50);
+    }
+
+    /*
+     when hit other enemies, increase the bulletGetTime to compute hit rate
+     */
+    public void onBulletHit(BulletHitEvent e) {
+        for (int i = 0; i < enemyVector.size(); i++) {
+            Enemy enemy = (Enemy) enemyVector.get(i);
+            if (enemy.name == e.getName()) {
+                enemy.bulletGetTimes++;
+                System.out.println("bullet hit: " + e.getName());
+            }
+        }
+    }
+
+    /*
+     check if the enemy is in the enemyList
+     if yes, enemy's information will be updated
+     if no, this enemy will be added to enemylist
+     */
+   public Enemy isinVector(ScannedRobotEvent e) {
+       Iterator iter2 = enemyVector.iterator();
+        while (iter2.hasNext()) {
+            Enemy enemy = (Enemy) (iter2.next());
+            if (enemy.name == e.getName()) {
+                enemy.update(e, this);
+                return enemy;
+            }
+        }
+		 Enemy enemy = new Enemy();
+            enemy.update(e, this);
+            enemyVector.add(enemy);
+        return enemy;
+    }
+}
+
+/*
+ Enemy class for storing all the information of each enemy
+ */
+class Enemy {
+
+    //enemy's name
+    public String name = null;
+    //enemy's position
+    public double x;
+    public double y;
+    //heading in radians
+    public double heading = 0.0d;
+    //bearing in radians
+    public double bearing = 0.0d;
+    public double distance = 0.0d;
+    public double direction = 0.0d;
+    public double velocity = 0.0d;
+    //enemy's heading in last scan
+    public double prevHeading = 0.0d;
+    public double energy = 100.0d;
+    //enemy's energy in last scan
+    public double prevEnergy = 100.0d;
+    public double currentTime = 0;
+    //system time in last scan
+    public double prevTime = 0;
+    //avoid nullpointException, set value bigger than 0.
+    //all the fire times to this enemy
+    public double bulletHitTimes = 1;
+    //the times that bullet has already hit the enemy
+    public double bulletGetTimes = 1;
+    public double hitRate;
+    //damage made by this enemy
+    public double damage = 0;
+
+    //update enemy's information
+    public void update(ScannedRobotEvent e, AdvancedRobot m) {
+        prevEnergy = energy;
+        prevHeading = heading;
+        prevTime = currentTime;
+        name = e.getName();
+        heading = e.getHeadingRadians();
+        bearing = e.getBearingRadians();
+        energy = e.getEnergy();
+        velocity = e.getVelocity();
+        distance = e.getDistance();
+        direction = bearing + m.getHeadingRadians();
+        x = m.getX() + Math.sin(direction) * distance;
+        y = m.getY() + Math.cos(direction) * distance;
+        currentTime = e.getTime();
+        //compute hit rate
+        hitRate = bulletGetTimes / bulletHitTimes;
+    }
+
+    //return enemy's distance
+    public double getDistance() {
+        return distance;
+    }
+
+    //return enemy's heading in radians
+    public double getHeading() {
+        return heading;
+    }
+
+    //return enemy's direction
+    public double getDirection() {
+        return direction;
+    }
+
+    //return enemy's velocity
+    public double getVelocity() {
+        return velocity;
+    }
+
+    //return enemy's bearing in radians
+    public double getBearing() {
+        return bearing;
+    }
+
+    //return x coordinates of enemy
+    public double getX() {
+        return x;
+    }
+
+    //return y coordinates of enemy
+    public double getY() {
+        return y;
+    }
+
+    //change angle of bearing to (-PI~PI)
+    public double normaliseBearing(double angle) {
+        if (angle > Math.PI) {
+            angle -= 2 * Math.PI;
+        }
+        if (angle < -Math.PI) {
+            angle += 2 * Math.PI;
+        }
+        return angle;
+    }
+
+    //change angle of heading to (0~2PI)
+    public double normaliseHeading(double angle) {
+        if (angle > 2 * Math.PI) {
+            angle -= 2 * Math.PI;
+        }
+        if (angle < 0) {
+            angle += 2 * Math.PI;
+        }
+        return angle;
+    }
+
+    //return the angle between two coordinates and X axis
+    double getAngle(double x1, double y1, double x2, double y2) {
+        return Math.atan2((x2 - x1), (y2 - y1));
+    }
+}
+
+/*
+ all the method is used to set the gun and fire (attack system)
+ */
+class Gun {
+
+    public Vector<Enemy> targetList;
+    public Enemy target = null;
+    public AdvancedRobot me;
+    public double firepower = 1;
+
+    //constructor
+    public Gun(Vector enemyVector, AdvancedRobot m) {
+        targetList = enemyVector;
+        me = m;
+    }
+
+    public void update() {
+        //choose target
+        closestTarget();
+        //set bullet power
+        setFirepower();
+        //set angle of gun and fire
+        setGun();
+
+    }
+
+    public void closestTarget() {
+        //choose the closest enemy from the enemyList
+        Iterator iter = targetList.iterator();
+        double minDistance = 99999;
+        while (iter.hasNext()) {
+            Enemy enemy = (Enemy) (iter.next());
+            double targetDistance = enemy.getDistance();
+            if (targetDistance < minDistance) {
+                minDistance = targetDistance;
+                target = enemy;
+            }
+        }
+    }
+
+    //set the firepower according to distance
+    public void setFirepower() {
+
+        if (target != null) {
+            firepower = 400 / target.distance;
+            if (firepower > 3) {
+                firepower = 3;
+            }
+        } else {
+            return;
+        }
+    }
+
+    public void setGun() {
+
+        if (target != null) {
+            //compute bullet velocity according to rule
+            double bulletVelocity = 20 - (3 * firepower);
+            //get target's distance
+            double targetDistance = target.getDistance();
+            //the direction for fire
+            double predictDirection = 0.0d;
+            //the target's heading change velocity (computed by the data from two scan)
+            //the value 0.00001 is used for linear movement.(assumed as a very large circle)
+            double headingoffset = (target.heading - target.prevHeading) / (target.currentTime - target.prevTime) + 0.00001;
+            //compute the radius of movement path 
+            double r = target.velocity / headingoffset;
+            //target's future coordinates
+            double predictX, predictY;
+            //using iteration method to get accurate target's distance.
+            //in order to compute the accurate future position
+            for (int i = 0; i < 5; i++) {
+                //the time that bullet fly to target
+                double bulletflyTime = target.distance / bulletVelocity;
+                //target's heading when the bullet arrived
+                double predictHeading = target.heading + headingoffset * (bulletflyTime);
+                //compute the future position of enemy
+                predictX = target.x - r * Math.cos(predictHeading) + r * Math.cos(target.heading);
+                predictY = target.y + r * Math.sin(predictHeading) - r * Math.sin(target.heading);
+                //predict the direction of enemy 
+                predictDirection = target.getAngle(me.getX(), me.getY(), predictX, predictY);
+                //update the target's distance to get more accurate distance
+                targetDistance = Point2D.distance(me.getX(), me.getY(), predictX, predictY);
+            }
+            //get the angle of gun rotates
+            double gunOffset = target.normaliseBearing(predictDirection - me.getGunHeadingRadians());
+            //rotate the gun 
+            me.setTurnGunRightRadians(gunOffset);
+			System.out.println(target.name+"  "+target.hitRate);
+            if (me.getGunHeat() == 0) {
+                //add some conditions for fire
+
+                //low energy, only fire when target disabled
+                if (me.getEnergy() <= 5) {
+                    //do nothing
+                    if (target.energy == 0) {
+                        me.setFire(0.1);
+                    }
+
+                } else {
+                    //my tank's energy is more than 5
+                    if (target.energy == 0) {
+                        me.setFire(0.1);
+                    } else {
+                        //according to the hit rate to select fire frequency
+                        if (target.hitRate <= 0.4 && target.hitRate >= 0.2) {
+
+                            if (me.getTime() % 20 == 0) {
+                                me.setFire(firepower);
+                                target.bulletHitTimes++;
+                            }
+                            //according to the hit rate to select fire frequency
+                        } else if (target.hitRate <= 0.6 && target.hitRate > 0.4) {
+
+                            if (me.getTime() % 5 == 0) {
+                                me.setFire(firepower);
+                                target.bulletHitTimes++;
+                            }
+                            //according to the hit rate to select fire frequency
+                        } else if (target.hitRate < 0.2) {
+
+                            if (me.getTime() % 50 == 0) {
+
+                                me.setFire(firepower);
+                                target.bulletHitTimes++;
+                            }
+                            //hit rate >0.6
+                        } else {
+                            me.setFire(firepower);
+                            target.bulletHitTimes++;
+
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+}
